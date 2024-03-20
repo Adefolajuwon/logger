@@ -19,6 +19,7 @@ function RequestLogger(opts = {}) {
 			opts.ignoreURLS &&
 			opts.ignoreURLS.find((url) => req.url.startsWith(url))
 		) {
+			console.log('Url not acceptable');
 			next();
 			return;
 		}
