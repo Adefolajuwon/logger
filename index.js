@@ -1,32 +1,97 @@
-function RequestLogger(opts = {}) {
+const pen = require('tiny-pen');
+const compressUA = require('compress-user-agent');
+
+const DATE_FORMAT = {
+	year: '2-digit',
+	month: 'numeric',
+	day: 'numeric',
+	hour: 'numeric',
+	minute: 'numeric',
+	second: 'numeric',
+};
+
+function requestLogger(options = {}) {
 	return async function (req, res, next) {
-		if (opts.enable == false) {
+		const start = process.hrtime();
+
+		if (options.activate === false) {
 			next();
 			return;
 		}
+
+		let ipAddress = req.connection.remoteAddress;
 		const country =
-			opts.cloudflare && req.headers['cf-ipcountry']
-				? req.headers['cf-ipcountry']
+			options.cloudflare && req.headers['cf-country']
+				? req.headers['cf-country']
 				: '';
 
-		if (opts.trustProxy)
-			remoteAddress = (req.headers['x-forwarded-for'] || '').split(',').shift();
-		else remoteAddress = req.connection.remoteAddress;
+		if (options.trustProxy && req.headers['x-forwarded-for']) {
+			ipAddress = req.headers['x-forwarded-for'].split(',')[0];
+		}
 
-		remoteAddress = trim(remoteAddress);
+		ipAddress = cleanIP(ipAddress);
 
-		if (
-			opts.ignoreURLS &&
-			opts.ignoreURLS.find((url) => req.url.startsWith(url))
-		) {
-			console.log('Url not acceptable');
+		if (options.excludeIPs && options.excludeIPs.includes(ipAddress)) {
 			next();
 			return;
 		}
+
+		if (
+			options.excludeURLs &&
+			options.excludeURLs.some((url) => req.url.startsWith(url))
+		) {
+			next();
+			return;
+		}
+
+		res.on('finish', () => {
+			const elapsed = process.hrtime(start);
+			const responseTime = elapsed[0] * 1000 + elapsed[1] / 1000000;
+
+			const openBracket = pen.gray(pen.bold('['));
+			const closeBracket = pen.gray(pen.bold(']'));
+
+			const log = [
+				'- Request',
+				openBracket +
+					pen.white(
+						new Date().toLocaleString(options.locale || 'en-GB', DATE_FORMAT)
+					) +
+					closeBracket,
+				openBracket +
+					pen.yellow(ipAddress) +
+					(country ? ' ' + pen.gray(country) : '') +
+					closeBracket,
+				openBracket + pen.cyan(req.method) + closeBracket,
+				pen.green(req.url) + closeBracket,
+				'Response Status Code:',
+				res.statusCode,
+				'Response Time:',
+				responseTime.toFixed(2) + 'ms',
+			];
+
+			if (options.includeHeaders) {
+				log.push(req.headers);
+			}
+
+			if (options.includeBody) {
+				log.push(req.body);
+			}
+
+			if (options.userAgent !== false) {
+				log.push(pen.gray(compressUA(req.headers['user-agent'])));
+			}
+
+			console.log(...log);
+		});
+
+		next();
 	};
 }
 
-function trim(addr) {
-	if (addr.startsWith('::ffff:')) addr = addr.slice(7);
+function cleanIP(addr) {
+	if (addr.startsWith('::ffff:')) {
+		return addr.slice(7);
+	}
 	return addr;
 }
